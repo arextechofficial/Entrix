@@ -16,3 +16,5 @@ A low-cost, outdoor access controller for electrically operated doors and gates.
   map, BOM and cost.
 * [Schematic, Rev A draft (PDF)](hardware/schematic/entrix-schematic-revA.pdf), with the
   [netlist](hardware/schematic/netlist.md) and [BOM](hardware/schematic/bom.csv).
+* [Hardware design Rev B](docs/hardware-design-revB.md): wired versions with an isolated RS485 bus,
+  Ethernet + PoE, or both (gateway).
