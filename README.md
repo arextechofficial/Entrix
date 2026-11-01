@@ -14,3 +14,5 @@ A low-cost, outdoor access controller for electrically operated doors and gates.
 
 * [Hardware design](docs/hardware-design.md): component choices, power, storage, enclosure, pin
   map, BOM and cost.
+* [Schematic, Rev A draft (PDF)](hardware/schematic/entrix-schematic-revA.pdf), with the
+  [netlist](hardware/schematic/netlist.md) and [BOM](hardware/schematic/bom.csv).

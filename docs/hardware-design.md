@@ -42,7 +42,7 @@ One small board per door, built from:
 ┌──────────────────── Entrix door unit (IP65 box) ─────────────────────┐
 │                                                                      │
 │  ┌───────────┐ DATA ┌─────────────────────┐ GPIO ┌────────┐          │  NO / COM / NC
-│  │ RXB6 433  ├─────►│                     ├─────►│ Relay  ├──────────┼──► lock / gate
+│  │ RXB61 433 ├─────►│                     ├─────►│ Relay  ├──────────┼──► lock / gate
 │  │ receiver  │      │      ESP32-C6       │      └────────┘          │    "open" input
 │  └───────────┘      │ BLE + Zigbee + WiFi │◄──── door contact, exit  │
 │  ┌───────────┐ I²C  │ 8 MB flash:         │      button, tamper      │
@@ -94,10 +94,21 @@ range or are mounted on or near metal.
 
 ### 3.2 RF remote receiver and remotes
 
-**Receiver: `RXB6` (or `RXB12`) 433.92 MHz superheterodyne OOK module, about $1.**
+**Receiver: `RXB61` (or `RXB6` / `RXB12`) 433.92 MHz superheterodyne OOK module, about $1.**
 
-* Runs on 3.3–5.5 V. Power it from **3.3 V** so its data output can connect straight to the
-  ESP32, whose GPIOs are not 5 V tolerant.
+* **RXB61 instead of RXB6:** yes, it does the same job. Both are 433.92 MHz superheterodyne
+  receivers with a digital DATA output, and the firmware decodes them identically. The differences
+  are mechanical:
+  * The RXB61 has **5 pins: VIN, GND, DATA, ANT, SHUT**. The RXB6 has two 4-pin groups and no SHUT
+    pin, so the footprints differ.
+  * No official RXB61 datasheet could be found. **Confirm the pin order on your module's silkscreen**
+    before PCB layout.
+  * SHUT must be held at the "receiver on" level. The schematic uses solder jumper JP1, set by
+    default to SHUT = GND (on, if the shutdown input is active-high, as on the SYN480R-type chips
+    these modules use). Use the other jumper position if your module turns out to be active-low.
+* The schematic powers the receiver from an RC-filtered **5 V** rail for best sensitivity, and
+  divides DATA down to 3.3 V with 10k/20k resistors, because the ESP32 GPIOs are not 5 V tolerant.
+  This works whether or not a particular module also runs at 3.3 V.
 * Sensitivity is about −107 dBm. That gives much better range and interference rejection than the
   cheap super-regenerative receivers (e.g. the RX board from the XY-MK-5V / FS1000A kits), which
   should be avoided.
@@ -125,18 +136,20 @@ relay 2.
 
 **Outputs**
 
-* **Relay 1 (always fitted):** 5 V coil, 10 A contacts, NO/COM/NC (e.g. `HF46F-5V`,
-  `SRD-05VDC-SL-C`). It is driven by an NPN or N-MOSFET with a flyback diode. A **pull-down
+* **Relay 1 (always fitted):** 5 V coil, 10 A contacts, NO/COM/NC (`SRD-05VDC-SL-C`, or the
+  same-footprint `HF3FF/005-1ZS` for a wider temperature range). It is driven by an `AO3400A`
+  N-MOSFET with a flyback diode. A **pull-down
   resistor on the driver input** ensures the relay can never click during boot or reset.
 * **Relay 2 (optional footprint):** for a second door, roller-shutter up/down, a siren, etc.
 * A potential-free (dry) contact works with **any** electric door type (see §6).
 
-**Inputs.** Each input goes through a `PC817` optocoupler (~$0.03 each) to survive long cables and
-surges.
+**Inputs.** The two field inputs go through a `PC817` optocoupler (~$0.03 each) with about 4 mA of
+wetting current, so long cables and surges never reach an ESP32 pin.
 
 * Door position contact (reed switch): enables "door forced open" and "door held open" log events.
 * Exit / request-to-exit push button.
-* Tamper switch on the box lid.
+* Tamper switch on the box lid. It is inside the box, so it connects through a series resistor and
+  pull-up only, without an optocoupler.
 
 **Local feedback:** a bi-color LED and a small buzzer for granted/denied, plus one **setup button**
 inside the box (factory reset / enable the admin hotspot).
@@ -148,11 +161,11 @@ Doors usually have 12 V DC (lock power supply), 24 V AC/DC (gate-motor accessory
 
 ```
 VIN 12–24 V AC or DC (either polarity)
- └► PTC resettable fuse 500 mA
-    └► bridge rectifier (MB10S)          — accepts AC and reversed DC
+ └► PTC resettable fuse 500 mA, ≥60 V
+    └► bridge rectifier (DB107S, 1 A)    — accepts AC and reversed DC
        └► TVS SMBJ40A + 470 µF / 63 V    — surge clamp and hold-up
-          └► buck converter rated 80 V in (XL7015-class) → 5 V   (relay)
-             └► LDO ≥600 mA (AP2112K-3.3) → 3.3 V               (ESP32-C6, RTC, RXB6)
+          └► buck converter rated 80 V in (XL7015E1) → 5 V       (relay, RF receiver, buzzer)
+             └► LDO ≥600 mA (AP2112K-3.3) → 3.3 V               (ESP32-C6, RTC)
 ```
 
 * 24 V AC rectifies to about 34–37 V peak. A 40 V regulator (e.g. LM2596) would have no margin, so
@@ -211,10 +224,13 @@ it; keep an I²C footprint for it.
 The ESP32 has no battery-backed clock, so it loses the time whenever power is lost. An external RTC
 is needed for meaningful log timestamps and for "disabled until <date>" and schedules.
 
-* **Default: `PCF8563`** (or the pin-compatible `BM8563`), about $0.2, plus a 32.768 kHz crystal and
+* **Default: `PCF8563T`** (or the pin-compatible `BM8563`), about $0.2, plus a 32.768 kHz crystal and
   a coin cell. The time is synced automatically whenever an admin connects (from the phone or
   browser clock) or from the Zigbee gateway, and the firmware can learn the drift and correct for
   it.
+* **PCF8563T instead of PCF8563:** they are the same chip. "PCF8563" is the part family; the
+  letters after it give the package: **T = SO-8**, TS = TSSOP-8, BS = HVSON-10. Suffixes such as
+  `/5` or `/F4` only mark the revision and packing. The schematic uses the PCF8563T (SO-8).
 * **If standalone doors are visited rarely** and you need minute accuracy over a year, use a
   `DS3231` instead (TCXO, ±2 ppm, about 1 min/year). It costs about $1.5–4 more.
 * **Battery:** use a **BR2032** (Li/CF, rated −30…+85 °C) instead of a CR2032 (−20…+70 °C), because
@@ -319,7 +335,8 @@ The hardware is the same for every option below; only the firmware differs.
 | 23 | `UART1_RX` (optional) | RS485 RO **or** LoRa module TXD |
 | 12 / 13 | USB D− / D+ | Programming and debugging (built-in USB-Serial-JTAG) |
 | 16 / 17 | UART0 TX / RX | Debug console |
-| 8, 15 | Strapping pins | Leave as the datasheet recommends |
+| 8 | Strapping pin | 10 kΩ pull-up (must be high for serial/USB download) |
+| 15 | Strapping pin | Left open |
 
 > Before laying out a PCB, check this against the "Strapping Pins" section of the ESP32-C6
 > datasheet and the pin-out of the exact module you buy. GPIO4/5/8/9/15 are strapping pins; the uses
@@ -334,10 +351,10 @@ The hardware is the same for every option below; only the firmware differs.
 | Item | Example | ~USD |
 |---|---|---|
 | MCU board | ESP32-C6 DevKitC-1 (or a clone / "ESP32-C6 SuperMini") | 3–9 |
-| 433 MHz receiver | RXB6 (superheterodyne) | 1–1.5 |
+| 433 MHz receiver | RXB61 or RXB6 (superheterodyne) | 1–1.5 |
 | Relay | 1-channel 5 V relay module, optocoupled. **Use high-level-trigger mode**: 3.3 V GPIOs cannot fully switch off low-level-trigger modules powered at 5 V | 0.8–1.2 |
 | Power | XL7015 buck module (5–80 V in) set to 5 V | 1–1.5 |
-| RTC | DS3231 or PCF8563 module with battery | 1–1.5 |
+| RTC | PCF8563 or DS3231 module with battery | 1–1.5 |
 | Protection and wiring | Bridge rectifier, TVS, PTC fuse, terminal blocks, perfboard | 1–2 |
 | I/O | LED, buzzer, reed switch, tamper micro-switch | 0.5–1 |
 | Enclosure | IP65 box, 2 cable glands, vent | 3–6 |
@@ -348,11 +365,11 @@ The hardware is the same for every option below; only the firmware differs.
 | Block | Parts | ~USD |
 |---|---|---|
 | MCU | ESP32-C6-WROOM-1-N8 | 2.8–3.2 |
-| RF receiver | RXB6 module soldered to the board (a later chip-down SYN480R design saves ~$0.5) | 0.8–1.0 |
-| Relay + driver | HF46F-5V / SRD-05 + MOSFET/NPN + diode + resistors | 0.35 |
-| Power | PTC, MB10S, SMBJ40A, 470 µF/63 V, XL7015 + inductor + Schottky, AP2112K-3.3 | 0.9 |
-| RTC | PCF8563/BM8563 + crystal + BR2032 + holder | 0.8 |
-| I/O | 3× PC817, LED, buzzer, setup and tamper switches | 0.4 |
+| RF receiver | RXB61 (or RXB6) module soldered to the board, RC filter, level-shift divider | 0.8–1.0 |
+| Relay + driver | SRD-05VDC-SL-C + AO3400A + SS14 + resistors | 0.35 |
+| Power | PTC, DB107S, SMBJ40A, 470 µF/63 V, XL7015E1 + inductor + SS310, AP2112K-3.3 | 0.9 |
+| RTC | PCF8563T/BM8563 + crystal + BAT54C + BR2032 + holder | 0.8 |
+| I/O | 2× PC817, 2 LEDs, buzzer + AO3400A, setup/reset buttons, USB-C + ESD | 0.6 |
 | Connectors | Pluggable terminal blocks (~10 positions), u.FL/SMA | 0.6 |
 | PCB | 2-layer, ~80 × 60 mm | 0.3 |
 | Assembly | SMT plus hand-soldered through-hole parts, set-up cost spread over the batch | 1–1.5 |
@@ -436,9 +453,46 @@ typedef struct {
 
 ## 9. Next steps
 
-1. **Breadboard prototype (§5.1):** ESP32-C6 DevKit, RXB6, relay module and RTC module. Firmware:
+1. **Breadboard prototype (§5.1):** ESP32-C6 DevKit, RXB61, relay module and RTC module. Firmware:
    decode the remote → look up the user → pulse the relay → write a log record.
 2. **Hotspot web UI:** user add/remove/temporary disable, log viewer and export, time sync.
 3. **Field test** at a real door: remote range, BLE/hotspot range, Zigbee range between two units.
 4. **Custom PCB rev A** with optional relay 2, RS485/LoRa and FRAM footprints.
 5. **Zigbee gateway** and central admin UI (firmware v2).
+
+## 10. Schematic (Rev A, draft)
+
+The full schematic is in [`hardware/schematic/`](../hardware/schematic/):
+
+| File | Contents |
+|---|---|
+| [`entrix-schematic-revA.pdf`](../hardware/schematic/entrix-schematic-revA.pdf) | All sheets in one A3 PDF, with a cover page and the GPIO map |
+| [`sheets/*.svg`](../hardware/schematic/sheets/) | The 9 sheets as separate drawings |
+| [`netlist.md`](../hardware/schematic/netlist.md) | Every net and the part pins on it, plus the parts list |
+| [`bom.csv`](../hardware/schematic/bom.csv) | Bill of materials grouped by value; DNP parts listed separately |
+| `build_schematic.py`, `netlist.py`, `make_pdf.js` | Scripts that generate the files above |
+
+Sheets: 1 power, 2 ESP32-C6, 3 USB-C and programming header, 4 RXB61 receiver, 5 RTC and optional
+FRAM, 6 relays, 7 inputs, 8 LEDs and buzzer, 9 expansion header and optional RS485.
+
+Parts drawn in grey are DNP (not fitted on the standard build): relay 2, the RS485 transceiver, the
+FRAM, the expansion and UART headers, and the SMA antenna jack.
+
+**Check these against the parts you actually buy before PCB layout:**
+
+1. The RXB61 pin order and SHUT polarity (no official datasheet found).
+2. The ESP32-C6-WROOM-1 pin numbers, against the current Espressif datasheet.
+3. The XL7015 pin-out, feed-forward capacitor C5 and inductor value, against the XLSEMI datasheet
+   revision you buy.
+
+**To regenerate** after editing a script:
+
+```bash
+pip install schemdraw==0.19
+python hardware/schematic/build_schematic.py
+python hardware/schematic/netlist.py
+node hardware/schematic/make_pdf.js
+```
+
+`netlist.py` and `build_schematic.py` describe the same circuit. Change both together.
+`make_pdf.js` needs Node.js with the `playwright` package.
